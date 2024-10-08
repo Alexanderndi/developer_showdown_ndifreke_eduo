@@ -9,7 +9,7 @@ use Faker\Factory as Faker;
 class UpdateUserDetails extends Command
 {
     protected $signature = 'update:user-details';
-    protected $description = 'Update users\' details';
+    protected $description = 'Update user details including firstname, lastname, and timezone';
 
     public function handle()
     {
