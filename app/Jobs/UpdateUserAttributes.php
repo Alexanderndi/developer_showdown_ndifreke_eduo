@@ -2,16 +2,15 @@
 
 namespace App\Jobs;
 
-use Illuminate\Bus\Queueable;
-use Illuminate\Queue\SerializesModels;
-use Illuminate\Queue\InteractsWithQueue;
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Support\Facades\RateLimiter;
 
 class UpdateUserAttributes implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Queueable;
 
     protected $user;
 
@@ -20,24 +19,39 @@ class UpdateUserAttributes implements ShouldQueue
         $this->user = $user;
     }
 
-    public function handle()
+    public function handle(): void
     {
-        // Make the API request here
+        // Define the rate limiter key using user's ID
+        $key = 'api-updates:' . $this->user->id;
+
+        // Check if too many attempts have been made
+        if (RateLimiter::tooManyAttempts($key, 60)) {
+            // If the limit is exceeded, delay the job or handle as needed
+            return $this->release(60);  // Release the job and retry after 60 seconds
+        }
+
+        // Perform the API request if the limit has not been exceeded
         $payload = [
-            'email' => $this->user->email,
             'name' => $this->user->name,
-            'time_zone' => $this->user->timezone,
+            'email' => $this->user->email,
+            'timezone' => $this->user->timezone,
         ];
 
-        // Call the API using HTTP Client
         $response = Http::post('https://api.example.com/batches', [
             'batches' => [
                 'subscribers' => [$payload]
             ]
         ]);
 
-        if ($response->failed()) {
-            // failure handler here
+        if ($response->successful()) {
+            // If the request is successful, hit the rate limiter to track this request
+            RateLimiter::hit($key);
+        } else {
+            Log::error('Failed to update user attributes', [
+                'user_id' => $this->user->id,
+                'response_code' => $response->status(),
+                'response_body' => $response->body(),
+            ]);
         }
     }
 }
