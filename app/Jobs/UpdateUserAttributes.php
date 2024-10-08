@@ -2,11 +2,12 @@
 
 namespace App\Jobs;
 
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Validation\ValidationException;
 
 class UpdateUserAttributes implements ShouldQueue
 {
@@ -14,23 +15,26 @@ class UpdateUserAttributes implements ShouldQueue
 
     protected $user;
 
+    /**
+     * Create a new job instance.
+     */
     public function __construct($user)
     {
         $this->user = $user;
     }
 
+    /**
+     * Execute the job.
+     */
     public function handle(): void
     {
-        // Define the rate limiter key using user's ID
-        $key = 'api-updates:' . $this->user->id;
-
-        // Check if too many attempts have been made
-        if (RateLimiter::tooManyAttempts($key, 60)) {
-            // If the limit is exceeded, delay the job or handle as needed
-            return $this->release(60);  // Release the job and retry after 60 seconds
+        // Rate limit check
+        if (RateLimiter::tooManyAttempts('api-updates:' . $this->user->id, 60)) {
+            Log::warning('Rate limit exceeded for user', ['user_id' => $this->user->id]);
+            return; // Exit the job if the limit is exceeded
         }
 
-        // Perform the API request if the limit has not been exceeded
+        // Make the API request
         $payload = [
             'name' => $this->user->name,
             'email' => $this->user->email,
@@ -43,15 +47,15 @@ class UpdateUserAttributes implements ShouldQueue
             ]
         ]);
 
-        if ($response->successful()) {
-            // If the request is successful, hit the rate limiter to track this request
-            RateLimiter::hit($key);
-        } else {
+        if ($response->failed()) {
+            // Handle failure - log the error or retry later
             Log::error('Failed to update user attributes', [
                 'user_id' => $this->user->id,
-                'response_code' => $response->status(),
-                'response_body' => $response->body(),
+                'response' => $response->body(),
             ]);
+        } else {
+            // Increment the rate limit on a successful response
+            RateLimiter::hit('api-updates:' . $this->user->id);
         }
     }
 }
